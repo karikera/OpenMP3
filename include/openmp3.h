@@ -10,13 +10,42 @@ namespace OpenMP3
 {
 
 	//enums
-	
+
+	enum Version
+	{
+		kVersionMPEG2_5,
+		kVersionReserved,
+		kVersionMPEG2,
+		kVersionMPEG1,
+	};
+
+	enum Layer
+	{
+		kLayerReserved,
+		kLayer3,
+		kLayer2,
+		kLayer1
+	};
+
 	enum Mode
 	{
 		kModeStereo,
 		kModeJointStereo,
 		kModeDualMono,
 		kModeMono
+	};
+
+	enum Result
+	{
+		kResultOk,
+		kResultEofAtFrameHeader,
+		kResultInvalidFrame,
+		kResultInvalidVersion,
+		kResultInvalidBitRates,
+		kResultInvalidSampleRates,
+		kResultInvalidLayer,
+		kResultEofAtProtectionBits,
+		kResultEofAtFrameData,
 	};
 
 
@@ -32,6 +61,10 @@ namespace OpenMP3
 	class Decoder;
 
 	class Frame;
+
+	struct Reservoir;
+
+	struct FrameData;
 
 
 
@@ -90,7 +123,7 @@ public:
 
 	//access
 
-	bool GetNext(Frame & frame);
+	Result GetNext(Frame & frame);
 
 
 
@@ -102,6 +135,81 @@ private:
 	const UInt8 * m_start, * m_ptr, * m_end;
 
 	bool m_hack_first;		//for Info frame skipping hack
+
+};
+
+
+
+//
+//reservoir
+
+struct OpenMP3::Reservoir
+{
+	void SetPosition(size_t bit_pos);
+
+	size_t GetPosition();
+
+	UInt ReadBit();
+
+	UInt ReadBits(UInt n);
+
+	UInt main_data_vec[2 * 1024];	//Large data	TODO bytes
+	UInt *main_data_ptr;			//Pointer into the reservoir
+	size_t main_data_idx;				//Index into the current byte(0-7)
+	UInt main_data_top;				//Number of bytes in reservoir(0-1024)
+
+	UInt hack_bits_read;
+};
+
+
+
+
+//
+//framedata
+
+struct OpenMP3::FrameData
+{
+	unsigned main_data_begin;         /* 9 bits */
+
+
+									  //side
+	struct Granule
+	{
+		unsigned part2_3_length;    /* 12 bits */
+		unsigned big_values;        /* 9 bits */
+		Float32 global_gain;       /* 8 bits */
+		unsigned scalefac_compress; /* 4 bits */
+
+		bool window_switching;
+		bool mixed_block;
+
+		unsigned block_type;        /* 2 bits */
+		unsigned table_select[3];   /* 5 bits */
+		Float32 subblock_gain[3];  /* 3 bits */
+								   /* table_select[] */
+		unsigned region0_count;     /* 4 bits */
+		unsigned region1_count;     /* 3 bits */
+									/* end */
+		unsigned preflag;           /* 1 bit */
+		unsigned scalefac_scale;    /* 1 bit */
+		unsigned count1table_select;/* 1 bit */
+
+		unsigned count1;            //calc: by huff.dec.!
+
+									//main
+		unsigned scalefac_l[21];    /* 0-4 bits */
+		unsigned scalefac_s[12][3]; /* 0-4 bits */
+		float is[576];               //calc: freq lines
+	};
+
+	struct Channel
+	{
+		unsigned scfsi[4];             /* 1 bit */
+	};
+	Channel channels[2];
+
+	Granule granules[2][2]; // [gr][ch]
+
 
 };
 
@@ -136,10 +244,9 @@ private:
 
 	const Library & library;
 
+	Reservoir m_br;
 
-	UInt8 m_br[8320];
-
-	UInt8 m_framedata[10496];
+	FrameData m_framedata;
 
 	Float32 m_hs_store[2][32][18];
 
@@ -178,19 +285,26 @@ public:
 
 	Mode GetMode() const;
 
+	UInt GetLength() const;
+
 
 
 private:
+
+	struct Private;
 
 	friend Iterator;
 
 	friend Decoder;
 
+	Version m_version;
+
+	Layer m_layer;
 
 	UInt8 m_bitrate_index;
 
 	UInt8 m_sr_index;
-
+	
 	Mode m_mode;
 
 	UInt8 m_mode_extension;

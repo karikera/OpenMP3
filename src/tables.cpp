@@ -6,14 +6,66 @@
 //
 //imp
 
-const OpenMP3::UInt  OpenMP3::kBitRates[15] =
+const OpenMP3::VersionInfo OpenMP3::kVersions[4] =
 {
-	//{ 0, 32000, 64000, 96000,128000,160000,192000,224000, 256000,288000,320000,352000,384000,416000,448000 }, //Layer 1
-	//{ 0, 32000, 48000, 56000, 64000, 80000, 96000,112000, 128000,160000,192000,224000,256000,320000,384000 }, //Layer 2
-	 0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000,128000,160000,192000,224000,256000,320000   //Layer 3
+	// MPEG 2.5
+	{
+		{
+			OpenMP3::kBitRates_mpeg2_layer2, 
+			OpenMP3::kBitRates_mpeg2_layer2,
+			OpenMP3::kBitRates_mpeg2_layer1,
+		},
+		{ 11025, 12000, 8000 },
+		{ 576, 1152, 384 },
+	},
+
+	// Reserved
+	{
+	},
+
+	// MPEG 2
+	{
+		{
+			OpenMP3::kBitRates_mpeg2_layer2,
+			OpenMP3::kBitRates_mpeg2_layer2,
+			OpenMP3::kBitRates_mpeg2_layer1,
+		},
+		{ 22050, 24000, 16000 },
+		{ 576, 1152, 384 },
+	},
+
+	// MPEG 1
+	{
+		{
+			OpenMP3::kBitRates_mpeg1_layer3,
+			OpenMP3::kBitRates_mpeg1_layer2,
+			OpenMP3::kBitRates_mpeg1_layer1,
+		},
+		{ 44100, 48000, 32000 },
+		{ 1152, 1152, 384 },
+	},
+};
+const OpenMP3::UInt OpenMP3::kBitRates_mpeg1_layer1[15] =
+{
+	0, 32000, 64000, 96000,128000,160000,192000,224000, 256000,288000,320000,352000,384000,416000,448000
+};
+const OpenMP3::UInt OpenMP3::kBitRates_mpeg1_layer2[15] =
+{
+	0, 32000, 48000, 56000, 64000, 80000, 96000,112000, 128000,160000,192000,224000,256000,320000,384000
+};
+const OpenMP3::UInt OpenMP3::kBitRates_mpeg1_layer3[15] =
+{
+	0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000,128000,160000,192000,224000,256000,320000
+};
+const OpenMP3::UInt OpenMP3::kBitRates_mpeg2_layer1[15] =
+{
+	0, 32000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 144000, 160000,176000, 192000, 224000, 256000
+};
+const OpenMP3::UInt OpenMP3::kBitRates_mpeg2_layer2[15] =
+{
+	0, 8000, 16000, 24000, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 144000, 160000
 };
 
-const OpenMP3::UInt  OpenMP3::kSampleRates[3] = { 44100, 48000, 32000 };
 
 const OpenMP3::ScaleFactorBandIndices OpenMP3::kScaleFactorBandIndices[3] =
 {

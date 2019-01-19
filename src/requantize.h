@@ -11,9 +11,9 @@
 namespace OpenMP3
 {
 
-	void Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, Float32 is[576]);
+	void Requantize(UInt sfreq, FrameData::Granule & granule);
 
-	void Reorder(UInt sfreq, const FrameData & data, UInt gr, UInt ch, Float32 is[576]);
+	void Reorder(UInt sfreq, FrameData::Granule & granule);
 
 }
 

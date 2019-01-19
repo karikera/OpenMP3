@@ -27,7 +27,7 @@ struct OpenMP3::Decoder::Private
 
 	static bool ReadMain(Decoder & self, const Frame & header);
 
-	static void DecodeFrame(Decoder & self, const Frame & header, Float32 is[2][2][576], Float32 out576[2][1152]);
+	static void DecodeFrame(Decoder & self, const Frame & header, Float32 out576[2][1152]);
 
 	static void ReadBytes(Decoder & self, UInt no_of_bytes, UInt data_vec[]);
 
@@ -53,19 +53,15 @@ OpenMP3::Library::Library()
 
 OpenMP3::Decoder::Decoder(const Library & library)
 	: library(library)
-{
-	CT_ASSERT(sizeof(m_br) >= sizeof(Reservoir));
-
-	CT_ASSERT(sizeof(m_framedata) >= sizeof(FrameData));
-
+{	
 	Reset();
 }
 
 void OpenMP3::Decoder::Reset()
 {
-	MemClear(m_br, sizeof(Reservoir));
+	MemClear(&m_br, sizeof(Reservoir));
 
-	MemClear(m_framedata, sizeof(FrameData));
+	MemClear(&m_framedata, sizeof(FrameData));
 
 	MemClear(m_hs_store, sizeof(m_hs_store));
 
@@ -78,9 +74,7 @@ OpenMP3::UInt OpenMP3::Decoder::ProcessFrame(const Frame & frame, Float32 output
 {
 	ASSERT(frame.m_ptr);
 
-	Reservoir & br = *(Reservoir*)(m_br + 0);
-
-	FrameData & data = *(FrameData*)(m_framedata + 0);
+	Reservoir & br = m_br;
 
 	m_stream_ptr = frame.m_ptr;
 
@@ -88,7 +82,7 @@ OpenMP3::UInt OpenMP3::Decoder::ProcessFrame(const Frame & frame, Float32 output
 
 	if (Private::ReadMain(*this, frame))	//returns false if not enough data in the bit reservoir
 	{
-		Private::DecodeFrame(*this, frame, data.is, output);
+		Private::DecodeFrame(*this, frame, output);
 
 		return frame.m_length;		//constant 1152, if not first Info frame
 	}
@@ -106,106 +100,116 @@ OpenMP3::UInt OpenMP3::Decoder::ProcessFrame(const Frame & frame, Float32 output
 
 bool OpenMP3::Decoder::Private::ReadSideInfo(Decoder & self, const Frame & frame)
 {
-	FrameData & sideinfo = *(FrameData*)(self.m_framedata + 0);
+	FrameData & sideinfo = self.m_framedata;
 
-	struct Local
+	auto GetSideBits = [](UInt n, const UInt8 * & ptr, UInt & idx)->UInt32 //TODO unify with resorvoir ReadBits
 	{
-		FORCEINLINE static UInt32 GetSideBits(UInt n, const UInt8 * & ptr, UInt & idx)	//TODO unify with resorvoir ReadBits
-		{
-			UInt32 a;	// = *reinterpret_cast<const UInt32*>(ptr);
+		UInt32 a;	// = *reinterpret_cast<const UInt32*>(ptr);
 
-			UInt8 * p = reinterpret_cast<UInt8*>(&a);
+		UInt8 * p = reinterpret_cast<UInt8*>(&a);
 
-			p[0] = ptr[3];
-			p[1] = ptr[2];
-			p[2] = ptr[1];
-			p[3] = ptr[0];
+		p[0] = ptr[3];
+		p[1] = ptr[2];
+		p[2] = ptr[1];
+		p[3] = ptr[0];
 
-			a = a << idx;		//Remove bits already used
+		a = a << idx;		//Remove bits already used
 
-			a = a >> (32 - n);	//Remove bits after the desired bits
-									
-			ptr += (idx + n) >> 3;
+		a = a >> (32 - n);	//Remove bits after the desired bits
 
-			idx = (idx + n) & 0x07;
+		ptr += (idx + n) >> 3;
 
-			return a;
-		}
+		idx = (idx + n) & 0x07;
+
+		return a;
 	};
 
 	bool mono = frame.m_mode == OpenMP3::kModeMono;
 
 	UInt nch = (mono ? 1 : 2);
 
-	UInt sideinfo_size = (mono ? 17 : 32);
-
+	UInt sideinfo_size = Frame::Private::GetSideInforSize(frame);
 	
 	const UInt8 * ptr = ReadBytes(self, sideinfo_size);
 
 	UInt idx = 0;
 
+	sideinfo.main_data_begin = GetSideBits(9, ptr, idx);
 
-	sideinfo.main_data_begin = Local::GetSideBits(9, ptr, idx);
-
-	Local::GetSideBits(mono ? 5 : 3, ptr, idx);	//skip private bits
+	GetSideBits(mono ? 5 : 3, ptr, idx);	//skip private bits
 
 												//scale factor selection information
-	for (UInt ch = 0; ch < nch; ch++) for (UInt scfsi_band = 0; scfsi_band < 4; scfsi_band++) sideinfo.scfsi[ch][scfsi_band] = Local::GetSideBits(1, ptr, idx);
-
-	for (UInt gr = 0; gr < 2; gr++)
+	for (auto & channel : sideinfo.channels)
 	{
-		for (UInt ch = 0; ch < nch; ch++)
+		for (unsigned & scfsi: channel.scfsi)
 		{
-			sideinfo.part2_3_length[gr][ch] = Local::GetSideBits(12, ptr, idx);
+			scfsi = GetSideBits(1, ptr, idx);
+		}
+	}
 
-			sideinfo.big_values[gr][ch] = Local::GetSideBits(9, ptr, idx);
+	for (auto & granules : sideinfo.granules)
+	{
+		for (auto & granule : granules)
+		{
+			granule.part2_3_length = GetSideBits(12, ptr, idx);
 
-			if (sideinfo.big_values[gr][ch] > 288) return false;
+			granule.big_values = GetSideBits(9, ptr, idx);
 
-			sideinfo.global_gain[gr][ch] = Float32(Local::GetSideBits(8, ptr, idx));
+			if (granule.big_values > 288) return false;
 
-			sideinfo.scalefac_compress[gr][ch] = Local::GetSideBits(4, ptr, idx);
+			granule.global_gain = Float32(GetSideBits(8, ptr, idx));
 
-			sideinfo.window_switching[gr][ch] = Local::GetSideBits(1, ptr, idx) == 1;
+			granule.scalefac_compress = GetSideBits(4, ptr, idx);
 
-			if (sideinfo.window_switching[gr][ch])
+			granule.window_switching = GetSideBits(1, ptr, idx) == 1;
+
+			if (granule.window_switching)
 			{
-				sideinfo.block_type[gr][ch] = Local::GetSideBits(2, ptr, idx);
+				granule.block_type = GetSideBits(2, ptr, idx);
 
-				sideinfo.mixed_block[gr][ch] = Local::GetSideBits(1, ptr, idx) == 1;
+				granule.mixed_block = GetSideBits(1, ptr, idx) == 1;
 
-				for (UInt region = 0; region < 2; region++) sideinfo.table_select[gr][ch][region] = Local::GetSideBits(5, ptr, idx);
-
-				for (UInt window = 0; window < 3; window++) sideinfo.subblock_gain[gr][ch][window] = Float32(Local::GetSideBits(3, ptr, idx));
-
-				if ((sideinfo.block_type[gr][ch] == 2) && (!sideinfo.mixed_block[gr][ch]))
+				for (UInt region = 0; region < 2; region++)
 				{
-					sideinfo.region0_count[gr][ch] = 8; /* Implicit */
+					granule.table_select[region] = GetSideBits(5, ptr, idx);
+				}
+
+				for (UInt window = 0; window < 3; window++)
+				{
+					granule.subblock_gain[window] = Float32(GetSideBits(3, ptr, idx));
+				}
+
+				if ((granule.block_type == 2) && (!granule.mixed_block))
+				{
+					granule.region0_count = 8; /* Implicit */
 				}
 				else
 				{
-					sideinfo.region0_count[gr][ch] = 7; /* Implicit */
+					granule.region0_count = 7; /* Implicit */
 				}
 
 				/* The standard is wrong on this!!! */   /* Implicit */
-				sideinfo.region1_count[gr][ch] = 20 - sideinfo.region0_count[gr][ch];
+				granule.region1_count = 20 - granule.region0_count;
 			}
 			else
 			{
-				for (UInt region = 0; region < 3; region++) sideinfo.table_select[gr][ch][region] = Local::GetSideBits(5, ptr, idx);
+				for (UInt region = 0; region < 3; region++)
+				{
+					granule.table_select[region] = GetSideBits(5, ptr, idx);
+				}
 
-				sideinfo.region0_count[gr][ch] = Local::GetSideBits(4, ptr, idx);
+				granule.region0_count = GetSideBits(4, ptr, idx);
 
-				sideinfo.region1_count[gr][ch] = Local::GetSideBits(3, ptr, idx);
+				granule.region1_count = GetSideBits(3, ptr, idx);
 
-				sideinfo.block_type[gr][ch] = 0;  /* Implicit */
+				granule.block_type = 0;  /* Implicit */
 			}
 
-			sideinfo.preflag[gr][ch] = Local::GetSideBits(1, ptr, idx);
+			granule.preflag = GetSideBits(1, ptr, idx);
 
-			sideinfo.scalefac_scale[gr][ch] = Local::GetSideBits(1, ptr, idx);
+			granule.scalefac_scale = GetSideBits(1, ptr, idx);
 
-			sideinfo.count1table_select[gr][ch] = Local::GetSideBits(1, ptr, idx);
+			granule.count1table_select = GetSideBits(1, ptr, idx);
 		}
 	}
 
@@ -216,9 +220,9 @@ bool OpenMP3::Decoder::Private::ReadSideInfo(Decoder & self, const Frame & frame
 
 bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 {
-	Reservoir & br = *(Reservoir*)(self.m_br + 0);
+	Reservoir & br = self.m_br;
 
-	FrameData & data = *(FrameData*)(self.m_framedata + 0);
+	FrameData & data = self.m_framedata;
 
 	struct Local
 	{
@@ -257,7 +261,7 @@ bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 
 	UInt nch = (frame.m_mode == OpenMP3::kModeMono ? 1 : 2);
 
-	UInt sideinfo_size = (nch == 1 ? 17 : 32);
+	UInt sideinfo_size = Frame::Private::GetSideInforSize(frame);
 
 	UInt main_data_size = frame.m_datasize - sideinfo_size;
 
@@ -273,15 +277,12 @@ bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 
 	for (UInt gr = 0; gr < 2; gr++)
 	{
-		auto scalefac_compress_gr = data.scalefac_compress[gr];
-
-		auto scalefac_l_gr = data.scalefac_l[gr];
-
-		auto scalefac_s_gr = data.scalefac_s[gr];
-
+		auto & granules = data.granules[gr];
 		for (UInt ch = 0; ch < nch; ch++)
 		{
-			UInt part_2_start = br.GetPosition();
+			auto & granule = granules[ch];
+			auto & channel = data.channels[ch];
+			size_t part_2_start = br.GetPosition();
 
 			/* Number of bits in the bitstream for the bands */
 
@@ -289,15 +290,21 @@ bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 
 			//UInt slen2 = kScaleFactorSizes[data.scalefac_compress[gr][ch]][1];
 
-			auto scalefactors = kScaleFactorSizes[scalefac_compress_gr[ch]];
+			auto scalefactors = kScaleFactorSizes[granule.scalefac_compress];
 
 			UInt slen1 = scalefactors[0];
 
 			UInt slen2 = scalefactors[1];
 
-			if (data.window_switching[gr][ch] && (data.block_type[gr][ch] == 2))
+			if (granule.window_switching && (granule.block_type == 2))
 			{
-				if (data.mixed_block[gr][ch]) for (sfb = 0; sfb < 8; sfb++) scalefac_l_gr[ch][sfb] = br.ReadBits(slen1);
+				if (granule.mixed_block)
+				{
+					for (sfb = 0; sfb < 8; sfb++)
+					{
+						granule.scalefac_l[sfb] = br.ReadBits(slen1);
+					}
+				}
 
 				//for (sfb = 0; sfb < 12; sfb++)
 				//{
@@ -306,58 +313,73 @@ bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 				//	for (UInt win = 0; win < 3; win++) scalefac_s_gr[ch][sfb][win] = br.ReadBits(nbits);
 				//}
 
-				for (sfb = 0; sfb < 6; sfb++) for (UInt win = 0; win < 3; win++) scalefac_s_gr[ch][sfb][win] = br.ReadBits(slen1);
+				for (sfb = 0; sfb < 6; sfb++)
+				{
+					for (UInt win = 0; win < 3; win++)
+					{
+						granule.scalefac_s[sfb][win] = br.ReadBits(slen1);
+					}
+				}
 
-				for (sfb = 6; sfb < 12; sfb++) for (UInt win = 0; win < 3; win++) scalefac_s_gr[ch][sfb][win] = br.ReadBits(slen2);
+				for (sfb = 6; sfb < 12; sfb++)
+				{
+					for (UInt win = 0; win < 3; win++)
+					{
+						granule.scalefac_s[sfb][win] = br.ReadBits(slen2);
+					}
+				}
 			}
 			else
-			{ /* block_type == 0 if winswitch == 0 */
-			  /* Scale factor bands 0-5 */
-				if ((data.scfsi[ch][0] == 0) || (gr == 0))
+			{
+				auto & granule0 = data.granules[0][ch];
+				auto & granule1 = data.granules[1][ch];
+				/* block_type == 0 if winswitch == 0 */
+				/* Scale factor bands 0-5 */
+				if ((channel.scfsi[0] == 0) || (gr == 0))
 				{
-					for (sfb = 0; sfb < 6; sfb++) scalefac_l_gr[ch][sfb] = br.ReadBits(slen1);
+					for (sfb = 0; sfb < 6; sfb++) granule.scalefac_l[sfb] = br.ReadBits(slen1);
 				}
-				else if ((data.scfsi[ch][0] == 1) && (gr == 1))
+				else if ((channel.scfsi[0] == 1) && (gr == 1))
 				{
 					/* Copy scalefactors from granule 0 to granule 1 */
-					for (sfb = 0; sfb < 6; sfb++) data.scalefac_l[1][ch][sfb] = data.scalefac_l[0][ch][sfb];
+					MemCopy(granule1.scalefac_l, granule0.scalefac_l, 6 * sizeof(unsigned));
 				}
 
 				/* Scale factor bands 6-10 */
-				if ((data.scfsi[ch][1] == 0) || (gr == 0))
+				if ((channel.scfsi[1] == 0) || (gr == 0))
 				{
-					for (sfb = 6; sfb < 11; sfb++) scalefac_l_gr[ch][sfb] = br.ReadBits(slen1);
+					for (sfb = 6; sfb < 11; sfb++) granule.scalefac_l[sfb] = br.ReadBits(slen1);
 				}
-				else if ((data.scfsi[ch][1] == 1) && (gr == 1))
+				else if ((channel.scfsi[1] == 1) && (gr == 1))
 				{
 					/* Copy scalefactors from granule 0 to granule 1 */
-					for (sfb = 6; sfb < 11; sfb++) data.scalefac_l[1][ch][sfb] = data.scalefac_l[0][ch][sfb];
+					MemCopy(granule1.scalefac_l+6, granule0.scalefac_l+6, 5 * sizeof(unsigned));
 				}
 
 				/* Scale factor bands 11-15 */
-				if ((data.scfsi[ch][2] == 0) || (gr == 0))
+				if ((channel.scfsi[2] == 0) || (gr == 0))
 				{
-					for (sfb = 11; sfb < 16; sfb++) scalefac_l_gr[ch][sfb] = br.ReadBits(slen2);
+					for (sfb = 11; sfb < 16; sfb++) granule.scalefac_l[sfb] = br.ReadBits(slen2);
 				}
-				else if ((data.scfsi[ch][2] == 1) && (gr == 1))
+				else if ((channel.scfsi[2] == 1) && (gr == 1))
 				{
 					/* Copy scalefactors from granule 0 to granule 1 */
-					for (sfb = 11; sfb < 16; sfb++) data.scalefac_l[1][ch][sfb] = data.scalefac_l[0][ch][sfb];
+					MemCopy(granule1.scalefac_l + 11, granule0.scalefac_l + 11, 5 * sizeof(unsigned));
 				}
 
 				/* Scale factor bands 16-20 */
-				if ((data.scfsi[ch][3] == 0) || (gr == 0))
+				if ((channel.scfsi[3] == 0) || (gr == 0))
 				{
-					for (sfb = 16; sfb < 21; sfb++) scalefac_l_gr[ch][sfb] = br.ReadBits(slen2);
+					for (sfb = 16; sfb < 21; sfb++) granule.scalefac_l[sfb] = br.ReadBits(slen2);
 				}
-				else if ((data.scfsi[ch][3] == 1) && (gr == 1))
+				else if ((channel.scfsi[3] == 1) && (gr == 1))
 				{
 					/* Copy scalefactors from granule 0 to granule 1 */
-					for (sfb = 16; sfb < 21; sfb++) data.scalefac_l[1][ch][sfb] = data.scalefac_l[0][ch][sfb];
+					MemCopy(granule1.scalefac_l + 16, granule0.scalefac_l + 16, 5 * sizeof(unsigned));
 				}
 			}
 
-			data.count1[gr][ch] = ReadHuffman(br, frame.m_sr_index, data, part_2_start, gr, ch, data.is[gr][ch]);
+			granule.count1 = ReadHuffman(br, frame.m_sr_index, granule, part_2_start);
 		}
 	}
 
@@ -372,9 +394,9 @@ bool OpenMP3::Decoder::Private::ReadMain(Decoder & self, const Frame & frame)
 	return true;
 }
 
-void OpenMP3::Decoder::Private::DecodeFrame(Decoder & self, const Frame & header, Float32 datais[2][2][576], float out[2][1152])
+void OpenMP3::Decoder::Private::DecodeFrame(Decoder & self, const Frame & header, float out[2][1152])
 {
-	const FrameData & data = *(FrameData*)(self.m_framedata + 0);
+	FrameData & data = self.m_framedata;
 
 	UInt sfreq = header.m_sr_index;
 
@@ -386,19 +408,19 @@ void OpenMP3::Decoder::Private::DecodeFrame(Decoder & self, const Frame & header
 	{
 		for (UInt gr = 0; gr < 2; gr++)
 		{
-			auto & is = datais[gr][0];
+			auto & granule = data.granules[gr][0];
 
-			Requantize(sfreq, data, gr, 0, is);
+			Requantize(sfreq, granule);
 
-			Reorder(sfreq, data, gr, 0, is);
+			Reorder(sfreq, granule);
 
-			Antialias(data, gr, 0, is);
+			Antialias(granule);
 
-			HybridSynthesis(data, gr, 0, store[0], is);
+			HybridSynthesis(granule, store[0]);
 
-			FrequencyInversion(is);
+			FrequencyInversion(granule.is);
 
-			SubbandSynthesis(data, is, v_vec[0], out[0] + (576 * gr));
+			SubbandSynthesis(data, granule.is, v_vec[0], out[0] + (576 * gr));
 		}
 
 		memcpy(out[1], out[0], 1152 * sizeof(Float32));
@@ -413,26 +435,26 @@ void OpenMP3::Decoder::Private::DecodeFrame(Decoder & self, const Frame & header
 		{
 			for (UInt ch = 0; ch < 2; ch++)
 			{
-				auto & is = datais[gr][ch];
+				auto & granule = data.granules[gr][ch];
 
-				Requantize(sfreq, data, gr, ch, is);
+				Requantize(sfreq, granule);
 
-				Reorder(sfreq, data, gr, ch, is);
+				Reorder(sfreq, granule);
 			}
 
-			if (stereo_decoding) Stereo(sfreq, joint_stereo_mode, data, gr, datais[gr]);
+			if (stereo_decoding) Stereo(sfreq, joint_stereo_mode, data, gr);
 
 			for (UInt ch = 0; ch < 2; ch++)
 			{
-				auto & is = datais[gr][ch];
+				auto & granule = data.granules[gr][ch];
 
-				Antialias(data, gr, ch, is);
+				Antialias(granule);
 
-				HybridSynthesis(data, gr, ch, store[ch], is);
+				HybridSynthesis(granule, store[ch]);
 
-				FrequencyInversion(is);
+				FrequencyInversion(granule.is);
 
-				SubbandSynthesis(data, is, v_vec[ch], out[ch] + (576 * gr));
+				SubbandSynthesis(data, granule.is, v_vec[ch], out[ch] + (576 * gr));
 			}
 		}
 	}

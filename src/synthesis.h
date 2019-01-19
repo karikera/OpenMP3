@@ -11,9 +11,9 @@
 namespace OpenMP3
 {
 
-	void Antialias(const FrameData & data, UInt gr, UInt ch, Float32 is[576]);
+	void Antialias(FrameData::Granule & granule);
 
-	void HybridSynthesis(const FrameData & data, UInt gr, UInt ch, Float32 store[32][18], Float32 is[576]);
+	void HybridSynthesis(FrameData::Granule & granule, Float32 store[32][18]);
 
 	void FrequencyInversion(Float32 is[576]);
 

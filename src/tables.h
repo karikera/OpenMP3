@@ -15,10 +15,20 @@ namespace OpenMP3
 		UInt s[14];
 	};
 
-	
-	extern const UInt kBitRates[15];
+	struct VersionInfo
+	{
+		const UInt * kBitRates[3];
+		UInt kSampleRates[3];
+		UInt kSamplesPerFrame[3];
+	};
 
-	extern const UInt kSampleRates[3];
+	extern const VersionInfo kVersions[4];
+	
+	extern const UInt kBitRates_mpeg1_layer1[15];
+	extern const UInt kBitRates_mpeg1_layer2[15];
+	extern const UInt kBitRates_mpeg1_layer3[15];
+	extern const UInt kBitRates_mpeg2_layer1[15]; // & MPEG-2.5
+	extern const UInt kBitRates_mpeg2_layer2[15]; // & MPEG-2.5, Layer3
 
 
 	extern const ScaleFactorBandIndices kScaleFactorBandIndices[3];

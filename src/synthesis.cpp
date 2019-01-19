@@ -23,13 +23,15 @@ namespace OpenMP3
 
 }
 
-void OpenMP3::Antialias(const FrameData & data, UInt gr, UInt ch, Float32 is[576])
+void OpenMP3::Antialias(FrameData::Granule & granule)
 {
-	bool window_switching = data.window_switching[gr][ch];
+	auto & is = granule.is;
 
-	bool block_type_2 = data.block_type[gr][ch] == 2;
+	bool window_switching = granule.window_switching;
 
-	bool mixed_block = data.mixed_block[gr][ch];
+	bool block_type_2 = granule.block_type == 2;
+
+	bool mixed_block = granule.mixed_block;
 
 
 	// No antialiasing is done for short blocks
@@ -52,7 +54,7 @@ void OpenMP3::Antialias(const FrameData & data, UInt gr, UInt ch, Float32 is[576
 
 			Float32 lb = is[li] * cs - is[ui] * ca;
 
-			Float32 ub = is[ui] * cs+ is[li] * ca;
+			Float32 ub = is[ui] * cs + is[li] * ca;
 
 			is[li] = lb;
 
@@ -61,13 +63,15 @@ void OpenMP3::Antialias(const FrameData & data, UInt gr, UInt ch, Float32 is[576
 	}
 }
 
-void OpenMP3::HybridSynthesis(const FrameData & data, UInt gr, UInt ch, Float32 store[32][18], Float32 is[576])
+void OpenMP3::HybridSynthesis(FrameData::Granule & granule, Float32 store[32][18])
 {
-	bool window_switching = data.window_switching[gr][ch];
+	auto & is = granule.is;
 
-	UInt block_type = data.block_type[gr][ch];
+	bool window_switching = granule.window_switching;
 
-	bool mixed_block = data.mixed_block[gr][ch];
+	UInt block_type = granule.block_type;
+
+	bool mixed_block = granule.mixed_block;
 
 	Float32 rawout[36];
 

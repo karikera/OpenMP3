@@ -32,10 +32,12 @@ namespace OpenMP3
 //
 //impl
 
-OpenMP3::UInt OpenMP3::ReadHuffman(Reservoir & br, UInt sfreq, const FrameData & data, UInt part_2_start, UInt gr, UInt ch, Float32 is[576])
+OpenMP3::UInt OpenMP3::ReadHuffman(Reservoir & br, UInt sfreq, FrameData::Granule & granule, size_t part_2_start)
 {
+	auto & is = granule.is;
+
 	//Check that there is any data to decode. If not,zero the array
-	if (data.part2_3_length[gr][ch] == 0) 
+	if (granule.part2_3_length == 0) 
 	{
 		for (UInt i = 0; i < 576; i++) is[i] = 0.0f;
 
@@ -48,10 +50,10 @@ OpenMP3::UInt OpenMP3::ReadHuffman(Reservoir & br, UInt sfreq, const FrameData &
 
 	UInt table_num, is_pos, region_1_start, region_2_start;
 
-	UInt bit_pos_end = part_2_start + data.part2_3_length[gr][ch] - 1; //calc the index of the last bit for this part
+	size_t bit_pos_end = part_2_start + granule.part2_3_length - 1; //calc the index of the last bit for this part
 
 	/* Determine region boundaries */
-	if (data.window_switching[gr][ch] && (data.block_type[gr][ch] == 2))
+	if (granule.window_switching && (granule.block_type == 2))
 	{
 		region_1_start = 36;  /* sfb[9/3]*3=36 */
 
@@ -59,16 +61,16 @@ OpenMP3::UInt OpenMP3::ReadHuffman(Reservoir & br, UInt sfreq, const FrameData &
 	}
 	else 
 	{
-		region_1_start = kScaleFactorBandIndices[sfreq].l[data.region0_count[gr][ch] + 1];
+		region_1_start = kScaleFactorBandIndices[sfreq].l[granule.region0_count + 1];
 		
-		region_2_start = kScaleFactorBandIndices[sfreq].l[data.region0_count[gr][ch] + data.region1_count[gr][ch] + 2];
+		region_2_start = kScaleFactorBandIndices[sfreq].l[granule.region0_count + granule.region1_count + 2];
 	}
 
 	/* Read big_values using tables according to region_x_start */
 
-	auto table_select = data.table_select[gr][ch];
+	auto table_select = granule.table_select;
 
-	for (is_pos = 0; is_pos < data.big_values[gr][ch] * 2; /*is_pos++*/)
+	for (is_pos = 0; is_pos < granule.big_values * 2; /*is_pos++*/)
 	{
 		if (is_pos < region_1_start) 
 		{
@@ -91,9 +93,9 @@ OpenMP3::UInt OpenMP3::ReadHuffman(Reservoir & br, UInt sfreq, const FrameData &
 	}
 	
 	/* Read small values until is_pos = 576 or we run out of huffman data */
-	table_num = data.count1table_select[gr][ch] + 32;
+	table_num = granule.count1table_select + 32;
 
-	for (is_pos = data.big_values[gr][ch] * 2; (is_pos <= 572) && (br.GetPosition() <= bit_pos_end); /*is_pos++*/)
+	for (is_pos = granule.big_values * 2; (is_pos <= 572) && (br.GetPosition() <= bit_pos_end); /*is_pos++*/)
 	{
 		HuffmanDecode(br, table_num, &x, &y, &v, &w);
 

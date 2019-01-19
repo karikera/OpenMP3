@@ -14,9 +14,9 @@ namespace OpenMP3
 
 	Float32 Requantize_Pow_43(Float32 is_pos);
 
-	void RequantizeLong(const FrameData & data, UInt gr, UInt ch, UInt is_pos, UInt sfb, Float32 is[576]);
+	void RequantizeLong(FrameData::Granule & granule, UInt is_pos, UInt sfb);
 
-	void RequantizeShort(const FrameData & data, UInt gr, UInt ch, UInt is_pos, UInt sfb, UInt win, Float32 is[576]);
+	void RequantizeShort(FrameData::Granule & granule, UInt is_pos, UInt sfb, UInt win);
 
 
 	extern const Float32 kPreTab[21];
@@ -29,15 +29,15 @@ namespace OpenMP3
 //
 //impl
 
-void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, Float32 is[576])
+void OpenMP3::Requantize(UInt sfreq, FrameData::Granule & granule)
 {
 	UInt sfb /* scalefac band index */, next_sfb /* frequency of next sfb */, i, j;
 
 	/* Determine type of block to process */
-	if (data.window_switching[gr][ch] && (data.block_type[gr][ch] == 2))	//Short blocks
+	if (granule.window_switching && (granule.block_type == 2))	//Short blocks
 	{ 
 		/* Check if the first two subbands (=2*18 samples = 8 long or 3 short sfb's) uses long blocks */
-		if (data.mixed_block[gr][ch])
+		if (granule.mixed_block)
 		{ 
 			/* 2 longbl. sb  first */
 			/* First process the 2 long block subbands at the start */
@@ -55,7 +55,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 					next_sfb = kScaleFactorBandIndices[sfreq].l[sfb + 1];
 				}
 
-				RequantizeLong(data, gr, ch, i, sfb, is);
+				RequantizeLong(granule, i, sfb);
 			}
 		
 			/* And next the remaining,non-zero,bands which uses short blocks */
@@ -65,7 +65,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 			
 			UInt win_len = kScaleFactorBandIndices[sfreq].s[sfb + 1] - kScaleFactorBandIndices[sfreq].s[sfb];
 
-			for (i = 36; i < data.count1[gr][ch]; /* i++ done below! */)
+			for (i = 36; i < granule.count1; /* i++ done below! */)
 			{
 				/* Check if we're into the next scalefac band */
 				if (i == next_sfb)
@@ -79,7 +79,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 					win_len = kScaleFactorBandIndices[sfreq].s[sfb + 1] - kScaleFactorBandIndices[sfreq].s[sfb];
 				} 
 
-				for (UInt win = 0; win < 3; win++) for (j = 0; j < win_len; j++) RequantizeShort(data, gr, ch, i++, sfb, win, is);
+				for (UInt win = 0; win < 3; win++) for (j = 0; j < win_len; j++) RequantizeShort(granule, i++, sfb, win);
 			}
 		}
 		else //Only short blocks
@@ -90,7 +90,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 
 			UInt win_len = kScaleFactorBandIndices[sfreq].s[sfb + 1] - kScaleFactorBandIndices[sfreq].s[sfb];
 
-			for (i = 0; i < data.count1[gr][ch]; /* i++ done below! */)
+			for (i = 0; i < granule.count1; /* i++ done below! */)
 			{
 				/* Check if we're into the next scalefac band */
 				if (i == next_sfb) 
@@ -104,7 +104,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 					win_len = kScaleFactorBandIndices[sfreq].s[sfb + 1] - kScaleFactorBandIndices[sfreq].s[sfb];
 				}
 
-				for (UInt win = 0; win < 3; win++) for (j = 0; j < win_len; j++) RequantizeShort(data, gr, ch, i++, sfb, win, is);
+				for (UInt win = 0; win < 3; win++) for (j = 0; j < win_len; j++) RequantizeShort(granule, i++, sfb, win);
 			}
 		}
 	}
@@ -114,7 +114,7 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 
 		next_sfb = kScaleFactorBandIndices[sfreq].l[sfb + 1];
 
-		UInt n = data.count1[gr][ch];
+		UInt n = granule.count1;
 
 		for (i = 0; i < n; i++) 
 		{
@@ -127,25 +127,26 @@ void OpenMP3::Requantize(UInt sfreq, const FrameData & data, UInt gr, UInt ch, F
 				next_sfb = kScaleFactorBandIndices[sfreq].l[sfb + 1];
 			}
 
-			RequantizeLong(data, gr, ch, i, sfb, is);
+			RequantizeLong(granule, i, sfb);
 		}
 	}
 }
 
 
-void OpenMP3::Reorder(UInt sfreq, const FrameData & data, UInt gr, UInt ch, Float32 is[576])
+void OpenMP3::Reorder(UInt sfreq, FrameData::Granule & granule)
 {
+	auto & is = granule.is;
 	OpenMP3::Float32 re[576];	//TODO use working buffer
 
-	if (data.window_switching[gr][ch] && (data.block_type[gr][ch] == 2))	//Only reorder short blocks
+	if (granule.window_switching && (granule.block_type == 2))	//Only reorder short blocks
 	{
 		/* Check if the first two subbands (=2*18 samples = 8 long or 3 short sfb's) uses long blocks */
 
 		auto s = kScaleFactorBandIndices[sfreq].s;
 
-		UInt sfb = data.mixed_block[gr][ch] ? 3 : 0; /* 2 longbl. sb  first */
+		UInt sfb = granule.mixed_block ? 3 : 0; /* 2 longbl. sb  first */
 
-		UInt count1 = data.count1[gr][ch];
+		UInt count1 = granule.count1;
 
 		UInt next_sfb = s[sfb + 1] * 3;
 
@@ -187,17 +188,19 @@ inline float OpenMP3::Requantize_Pow_43(Float32 f_is_pos)
 }
 
 //requantize sample in subband that uses long blocks
-void OpenMP3::RequantizeLong(const FrameData & data, UInt gr, UInt ch, UInt is_pos, UInt sfb, Float32 is[576])
+void OpenMP3::RequantizeLong(FrameData::Granule & granule, UInt is_pos, UInt sfb)
 {
 	ASSERT(is_pos < 576);
 
-	float sf_mult = data.scalefac_scale[gr][ch] ? 1.0f : 0.5f;
+	auto & is = granule.is;
 	
-	float pf_x_pt = data.preflag[gr][ch] * kPreTab[sfb];
+	float sf_mult = granule.scalefac_scale ? 1.0f : 0.5f;
 	
-	Float64 tmp1 = pow(2.0, -(sf_mult *(data.scalefac_l[gr][ch][sfb] + pf_x_pt)));
+	float pf_x_pt = granule.preflag * kPreTab[sfb];
 	
-	Float64 tmp2 = pow(2.0, 0.25 * (data.global_gain[gr][ch] - 210.0));
+	Float64 tmp1 = pow(2.0, -(sf_mult *(granule.scalefac_l[sfb] + pf_x_pt)));
+	
+	Float64 tmp2 = pow(2.0, 0.25 * (granule.global_gain - 210.0));
 
 	Float64 tmp3;
 
@@ -214,15 +217,17 @@ void OpenMP3::RequantizeLong(const FrameData & data, UInt gr, UInt ch, UInt is_p
 }
 
 //requantize sample in subband that uses short blocks
-void OpenMP3::RequantizeShort(const FrameData & data, UInt gr, UInt ch, UInt is_pos, UInt sfb, UInt win, Float32 is[576])
+void OpenMP3::RequantizeShort(FrameData::Granule & granule, UInt is_pos, UInt sfb, UInt win)
 {
 	ASSERT(is_pos < 576);
 
-	Float32 sf_mult = data.scalefac_scale[gr][ch] ? 1.0f : 0.5f;
+	auto & is = granule.is;
 
-	Float64 tmp1 = pow(2.0, -(sf_mult * data.scalefac_s[gr][ch][sfb][win]));
+	Float32 sf_mult = granule.scalefac_scale ? 1.0f : 0.5f;
 
-	Float64 tmp2 = pow(2.0, 0.25 * (data.global_gain[gr][ch] - 210.0f - 8.0f * data.subblock_gain[gr][ch][win]));
+	Float64 tmp1 = pow(2.0, -(sf_mult * granule.scalefac_s[sfb][win]));
+
+	Float64 tmp2 = pow(2.0, 0.25 * (granule.global_gain - 210.0f - 8.0f * granule.subblock_gain[win]));
 
 	Float64 tmp3 = (is[is_pos] < 0.0) ? -Requantize_Pow_43(-is[is_pos]) : Requantize_Pow_43(is[is_pos]);
 
